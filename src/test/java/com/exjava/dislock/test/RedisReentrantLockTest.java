@@ -28,8 +28,9 @@ public class RedisReentrantLockTest {
             new Thread(() -> {
                 boolean locked = false;
                 try {
-                    if (locked = lock.tryLock(-2, TimeUnit.MILLISECONDS)) {
-                        Thread.sleep(1000);
+                    if (locked = lock.tryLock(5, TimeUnit.SECONDS)) {
+                        Thread.sleep(10000);
+                        System.out.println("success#" + count.incrementAndGet());
                     } else {
                         System.out.println("fail#" + count.incrementAndGet());
                     }
