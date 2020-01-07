@@ -21,7 +21,7 @@ import java.util.concurrent.locks.Lock;
 public class RedisReentrantLock implements Lock {
     private final String key;
     private final ShardedJedisPool shardedJedisPool;
-    private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<>();
+    private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
     public RedisReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {

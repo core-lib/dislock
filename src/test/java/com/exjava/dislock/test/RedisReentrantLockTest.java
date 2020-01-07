@@ -22,23 +22,26 @@ public class RedisReentrantLockTest {
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
         ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
-        RedisReentrantLock lock = new RedisReentrantLock(key, pool);
-        AtomicInteger count = new AtomicInteger(0);
+        final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
+        final AtomicInteger count = new AtomicInteger(0);
         for (int i = 0; i < 100; i++) {
-            new Thread(() -> {
-                boolean locked = false;
-                try {
-                    if (locked = lock.tryLock(5, TimeUnit.SECONDS)) {
-                        Thread.sleep(10000);
-                        System.out.println("success#" + count.incrementAndGet());
-                    } else {
-                        System.out.println("fail#" + count.incrementAndGet());
-                    }
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                } finally {
-                    if (locked) {
-                        lock.unlock();
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    boolean locked = false;
+                    try {
+                        if (locked = lock.tryLock(5, TimeUnit.SECONDS)) {
+                            Thread.sleep(10000);
+                            System.out.println("success#" + count.incrementAndGet());
+                        } else {
+                            System.out.println("fail#" + count.incrementAndGet());
+                        }
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    } finally {
+                        if (locked) {
+                            lock.unlock();
+                        }
                     }
                 }
             }).start();
