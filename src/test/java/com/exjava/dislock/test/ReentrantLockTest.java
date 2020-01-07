@@ -1,6 +1,6 @@
 package com.exjava.dislock.test;
 
-import com.exjava.dislock.RedisReentrantLock;
+import com.exjava.dislock.ReentrantLock;
 import org.junit.Test;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.JedisShardInfo;
@@ -11,10 +11,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
+ * 分布式可重入锁测试
+ *
  * @author Payne 646742615@qq.com
  * 2020/1/7 15:25
  */
-public class RedisReentrantLockTest {
+public class ReentrantLockTest {
 
     @Test
     public void test() throws Exception {
@@ -22,7 +24,7 @@ public class RedisReentrantLockTest {
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
         ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
-        final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
+        final ReentrantLock lock = new ReentrantLock(key, pool);
         final AtomicInteger count = new AtomicInteger(0);
         for (int i = 0; i < 100; i++) {
             new Thread(new Runnable() {

@@ -18,12 +18,12 @@ import java.util.concurrent.locks.Lock;
  * @author Payne 646742615@qq.com
  * 2020/1/6 17:26
  */
-public class RedisReentrantLock implements Lock {
+public class ReentrantLock implements Lock {
     private final String key;
     private final ShardedJedisPool shardedJedisPool;
     private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
-    public RedisReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
+    public ReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }
