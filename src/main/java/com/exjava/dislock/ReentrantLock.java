@@ -165,8 +165,10 @@ public class ReentrantLock implements Lock {
         }
 
         void release() {
+            if (!writer.isConnected()) {
+                return;
+            }
             try {
-                if (!writer.isConnected()) return;
                 String script = "if redis.call(\"get\",KEYS[1]) == ARGV[1] then return redis.call(\"del\",KEYS[1]) else return 0 end";
                 writer.eval(script, 1, key, value);
                 writer.publish(key, value);

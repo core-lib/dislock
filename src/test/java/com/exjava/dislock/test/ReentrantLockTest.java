@@ -9,6 +9,7 @@ import redis.clients.jedis.ShardedJedisPool;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
 
 /**
  * 分布式可重入锁测试
@@ -40,7 +41,7 @@ public class ReentrantLockTest {
             }).start();
         }
 
-        Thread.sleep(20000);
+        Thread.sleep(30000);
     }
 
     @Test
@@ -75,6 +76,24 @@ public class ReentrantLockTest {
         }
 
         Thread.sleep(20000);
+    }
+
+    @Test
+    public void test() throws Exception {
+        final Lock lock = new java.util.concurrent.locks.ReentrantLock();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                lock.lock();
+                lock.unlock();
+                lock.unlock();
+            }
+        }).start();
+
+        Thread.sleep(1000);
+
+
+        Thread.sleep(10 * 1000);
     }
 
 }
