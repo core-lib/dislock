@@ -31,8 +31,8 @@ public class ReentrantLockTest {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    lock.lock();
                     try {
-                        lock.lock();
                         System.out.println(arr[0] += 1);
                     } finally {
                         lock.unlock();

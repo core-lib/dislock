@@ -105,13 +105,13 @@ public class ReentrantLock implements Lock {
     @Override
     public void unlock() {
         Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null || !entrance.handler.isLocked()) {
+        if (entrance == null) {
             throw new IllegalMonitorStateException();
         }
         if (entrance.decrease() == 0L) {
+            entranceThreadLocal.remove();
             Handler handler = entrance.handler;
             handler.release();
-            entranceThreadLocal.remove();
         }
     }
 
@@ -179,9 +179,6 @@ public class ReentrantLock implements Lock {
             }
         }
 
-        boolean isLocked() {
-            return locked;
-        }
     }
 
     private static class LockHandler extends Handler {
