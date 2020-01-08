@@ -3,12 +3,13 @@ package com.exjava.dislock;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.ShardedJedisPool;
+import redis.clients.jedis.params.SetParams;
 
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 
@@ -20,10 +21,15 @@ import java.util.concurrent.locks.Lock;
  */
 public class ReentrantLock implements Lock {
     private final String key;
+    private final long ttl;
     private final ShardedJedisPool shardedJedisPool;
     private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
     public ReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
+        this(key, 0, shardedJedisPool);
+    }
+
+    public ReentrantLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }
@@ -31,6 +37,7 @@ public class ReentrantLock implements Lock {
             throw new IllegalArgumentException("sharded jedis pool must not be null");
         }
         this.key = key;
+        this.ttl = ttl;
         this.shardedJedisPool = shardedJedisPool;
     }
 
@@ -38,7 +45,7 @@ public class ReentrantLock implements Lock {
     public void lock() {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
-            Handler handler = new LockHandler(key, shardedJedisPool);
+            Handler handler = new LockHandler(key, ttl, shardedJedisPool);
             handler.acquire();
             entrance = new Entrance(handler);
             entranceThreadLocal.set(entrance);
@@ -53,7 +60,7 @@ public class ReentrantLock implements Lock {
         }
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
-            Handler handler = new LockInterruptiblyHandler(key, shardedJedisPool);
+            Handler handler = new LockInterruptiblyHandler(key, ttl, shardedJedisPool);
             handler.acquire();
             entrance = new Entrance(handler);
             entranceThreadLocal.set(entrance);
@@ -65,7 +72,7 @@ public class ReentrantLock implements Lock {
     public boolean tryLock() {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
-            Handler handler = new TryLockHandler(key, shardedJedisPool);
+            Handler handler = new TryLockHandler(key, ttl, shardedJedisPool);
             if (!handler.acquire()) {
                 return false;
             }
@@ -84,7 +91,7 @@ public class ReentrantLock implements Lock {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
             long timeout = unit.toMillis(time);
-            Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, shardedJedisPool, timeout) : new TryLockHandler(key, shardedJedisPool);
+            Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, ttl, shardedJedisPool, timeout) : new TryLockHandler(key, ttl, shardedJedisPool);
             if (!handler.acquire()) {
                 return false;
             }
@@ -101,7 +108,7 @@ public class ReentrantLock implements Lock {
         if (entrance == null || !entrance.handler.isLocked()) {
             throw new IllegalMonitorStateException();
         }
-        if (entrance.decrease() == 0) {
+        if (entrance.decrease() == 0L) {
             Handler handler = entrance.handler;
             handler.release();
             entranceThreadLocal.remove();
@@ -115,7 +122,7 @@ public class ReentrantLock implements Lock {
 
     private static class Entrance {
         final Handler handler;
-        final AtomicInteger count = new AtomicInteger(0);
+        final AtomicLong count = new AtomicLong(0);
 
         Entrance(Handler handler) {
             this.handler = handler;
@@ -125,32 +132,41 @@ public class ReentrantLock implements Lock {
             count.incrementAndGet();
         }
 
-        int decrease() {
+        long decrease() {
             return count.decrementAndGet();
         }
     }
 
     private abstract static class Handler extends JedisPubSub {
         final String key;
+        final SetParams params;
         final Jedis reader;
         final Jedis writer;
 
         volatile boolean locked;
         final String value = UUID.randomUUID().toString();
 
-        Handler(String key, ShardedJedisPool shardedJedisPool) {
+        Handler(String key, long ttl, ShardedJedisPool shardedJedisPool) {
             this.key = key;
+            this.params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
             this.reader = shardedJedisPool.getResource().getShard(key);
             this.writer = shardedJedisPool.getResource().getShard(key);
         }
 
         boolean acquire() {
-            reader.subscribe(this, key);
-            return locked;
+            try {
+                reader.subscribe(this, key);
+                return locked;
+            } finally {
+                if (!locked) {
+                    this.release();
+                }
+            }
         }
 
         void release() {
             try {
+                if (!writer.isConnected()) return;
                 String script = "if redis.call(\"get\",KEYS[1]) == ARGV[1] then return redis.call(\"del\",KEYS[1]) else return 0 end";
                 writer.eval(script, 1, key, value);
                 writer.publish(key, value);
@@ -168,8 +184,8 @@ public class ReentrantLock implements Lock {
 
     private static class LockHandler extends Handler {
 
-        LockHandler(String key, ShardedJedisPool shardedJedisPool) {
-            super(key, shardedJedisPool);
+        LockHandler(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+            super(key, ttl, shardedJedisPool);
         }
 
         @Override
@@ -179,7 +195,8 @@ public class ReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            if (writer.setnx(key, value) > 0L) {
+            String result = writer.set(key, value, params);
+            if ("OK".equals(result)) {
                 locked = true;
                 this.unsubscribe(key);
             }
@@ -188,8 +205,8 @@ public class ReentrantLock implements Lock {
 
     private static class LockInterruptiblyHandler extends Handler {
 
-        LockInterruptiblyHandler(String key, ShardedJedisPool shardedJedisPool) {
-            super(key, shardedJedisPool);
+        LockInterruptiblyHandler(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+            super(key, ttl, shardedJedisPool);
         }
 
         @Override
@@ -199,7 +216,8 @@ public class ReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            if (writer.setnx(key, value) > 0L) {
+            String result = writer.set(key, value, params);
+            if ("OK".equals(result)) {
                 locked = true;
                 this.unsubscribe(key);
             }
@@ -208,13 +226,14 @@ public class ReentrantLock implements Lock {
 
     private static class TryLockHandler extends Handler {
 
-        TryLockHandler(String key, ShardedJedisPool shardedJedisPool) {
-            super(key, shardedJedisPool);
+        TryLockHandler(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+            super(key, ttl, shardedJedisPool);
         }
 
         @Override
         public void onSubscribe(String channel, int subscribedChannels) {
-            locked = writer.setnx(key, value) > 0L;
+            String result = writer.set(key, value, params);
+            locked = "OK".equals(result);
             this.unsubscribe(key);
         }
     }
@@ -230,8 +249,8 @@ public class ReentrantLock implements Lock {
             }
         };
 
-        TryLockTimeoutiblyHandler(String key, ShardedJedisPool shardedJedisPool, long timeout) {
-            super(key, shardedJedisPool);
+        TryLockTimeoutiblyHandler(String key, long ttl, ShardedJedisPool shardedJedisPool, long timeout) {
+            super(key, ttl, shardedJedisPool);
             this.timeout = timeout;
         }
 
@@ -243,7 +262,8 @@ public class ReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            if (writer.setnx(key, value) > 0L) {
+            String result = writer.set(key, value, params);
+            if ("OK".equals(result)) {
                 locked = true;
                 this.unsubscribe(key);
             }
@@ -254,4 +274,5 @@ public class ReentrantLock implements Lock {
             interrupter.cancel();
         }
     }
+
 }

@@ -19,12 +19,37 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ReentrantLockTest {
 
     @Test
-    public void test() throws Exception {
-        String key = "lock";
+    public void testWithoutTTL() throws Exception {
+        String key = "lockWithoutTimeout";
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
         ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
         final ReentrantLock lock = new ReentrantLock(key, pool);
+        final int[] arr = new int[1];
+        for (int i = 0; i < 1000; i++) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        lock.lock();
+                        System.out.println(arr[0] += 1);
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+            }).start();
+        }
+
+        Thread.sleep(20000);
+    }
+
+    @Test
+    public void testWithTTL() throws Exception {
+        String key = "lockWithTimeout";
+        JedisPoolConfig config = new JedisPoolConfig();
+        config.setMaxTotal(3000);
+        ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
+        final ReentrantLock lock = new ReentrantLock(key, 10 * 1000L, pool);
         final AtomicInteger count = new AtomicInteger(0);
         for (int i = 0; i < 100; i++) {
             new Thread(new Runnable() {
