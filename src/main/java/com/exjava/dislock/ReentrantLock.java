@@ -3,6 +3,7 @@ package com.exjava.dislock;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.ShardedJedisPool;
+import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.params.SetParams;
 
 import java.util.Timer;
@@ -42,7 +43,7 @@ public class ReentrantLock implements Lock {
     }
 
     @Override
-    public void lock() {
+    public void lock() throws JedisException {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
             Handler handler = new LockHandler(key, ttl, shardedJedisPool);
@@ -54,7 +55,7 @@ public class ReentrantLock implements Lock {
     }
 
     @Override
-    public void lockInterruptibly() throws InterruptedException {
+    public void lockInterruptibly() throws JedisException, InterruptedException {
         if (Thread.interrupted()) {
             throw new InterruptedException();
         }
@@ -69,7 +70,7 @@ public class ReentrantLock implements Lock {
     }
 
     @Override
-    public boolean tryLock() {
+    public boolean tryLock() throws JedisException {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
             Handler handler = new TryLockHandler(key, ttl, shardedJedisPool);
@@ -84,7 +85,7 @@ public class ReentrantLock implements Lock {
     }
 
     @Override
-    public boolean tryLock(long time, TimeUnit unit) throws InterruptedException {
+    public boolean tryLock(long time, TimeUnit unit) throws JedisException, InterruptedException {
         if (Thread.interrupted()) {
             throw new InterruptedException();
         }
@@ -103,7 +104,7 @@ public class ReentrantLock implements Lock {
     }
 
     @Override
-    public void unlock() {
+    public void unlock() throws JedisException {
         Entrance entrance = entranceThreadLocal.get();
         if (entrance == null) {
             throw new IllegalMonitorStateException();

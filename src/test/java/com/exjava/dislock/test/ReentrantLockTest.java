@@ -24,10 +24,10 @@ public class ReentrantLockTest {
         String key = "lockWithoutTimeout";
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
-        ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
+        ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
         final ReentrantLock lock = new ReentrantLock(key, pool);
         final int[] arr = new int[1];
-        for (int i = 0; i < 1000; i++) {
+        for (int i = 0; i < 200; i++) {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
