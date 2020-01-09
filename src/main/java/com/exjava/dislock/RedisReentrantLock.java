@@ -24,10 +24,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public class RedisReentrantLock implements Lock {
     protected final String key;
     protected final RedisAtomicity<String> atomicity;
+    protected final Lock lock;
     protected final ShardedJedisPool shardedJedisPool;
     protected final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
-
-    protected final Lock lock = new ReentrantLock();
 
     public RedisReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
         this(key, 0L, shardedJedisPool);
@@ -38,14 +37,25 @@ public class RedisReentrantLock implements Lock {
     }
 
     protected RedisReentrantLock(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
+        this(key, atomicity, new ReentrantLock(), shardedJedisPool);
+    }
+
+    protected RedisReentrantLock(String key, RedisAtomicity<String> atomicity, Lock lock, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
+        }
+        if (atomicity == null) {
+            throw new IllegalArgumentException("atomicity must not be null");
+        }
+        if (lock == null) {
+            throw new IllegalArgumentException("lock must not be null");
         }
         if (shardedJedisPool == null) {
             throw new IllegalArgumentException("sharded jedis pool must not be null");
         }
         this.key = key;
         this.atomicity = atomicity;
+        this.lock = lock;
         this.shardedJedisPool = shardedJedisPool;
     }
 
@@ -195,13 +205,13 @@ public class RedisReentrantLock implements Lock {
         @Override
         public boolean tryLock(ShardedJedis jedis, String value) {
             SetParams params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
-            String result = jedis.set(key, value, params);
+            String result = jedis.getShard(key).set(key, value, params);
             return "OK".equals(result);
         }
 
         @Override
         public void disLock(ShardedJedis jedis, String value) {
-            String script = "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
+            String script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
             jedis.getShard(key).eval(script, 1, key, value);
             jedis.getShard(key).publish(key, value);
         }
