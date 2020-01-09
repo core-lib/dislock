@@ -22,18 +22,22 @@ import java.util.concurrent.locks.ReentrantLock;
  * 2020/1/6 17:26
  */
 public class RedisReentrantLock implements Lock {
-    private final String key;
-    private final Sync sync;
-    private final ShardedJedisPool shardedJedisPool;
-    private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
+    protected final String key;
+    protected final RedisAtomicity<String> atomicity;
+    protected final ShardedJedisPool shardedJedisPool;
+    protected final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
-    private final Lock lock = new ReentrantLock();
+    protected final Lock lock = new ReentrantLock();
 
     public RedisReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
         this(key, 0L, shardedJedisPool);
     }
 
     public RedisReentrantLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+        this(key, new LockAtomicity(key, ttl), shardedJedisPool);
+    }
+
+    protected RedisReentrantLock(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }
@@ -41,7 +45,7 @@ public class RedisReentrantLock implements Lock {
             throw new IllegalArgumentException("sharded jedis pool must not be null");
         }
         this.key = key;
-        this.sync = new Sync(key, ttl);
+        this.atomicity = atomicity;
         this.shardedJedisPool = shardedJedisPool;
     }
 
@@ -51,7 +55,7 @@ public class RedisReentrantLock implements Lock {
         try {
             Entrance entrance = entranceThreadLocal.get();
             if (entrance == null) {
-                Handler handler = new LockHandler(key, sync, shardedJedisPool);
+                Handler handler = new LockHandler(key, atomicity, shardedJedisPool);
                 handler.acquire();
                 entrance = new Entrance(handler);
                 entranceThreadLocal.set(entrance);
@@ -72,7 +76,7 @@ public class RedisReentrantLock implements Lock {
         try {
             Entrance entrance = entranceThreadLocal.get();
             if (entrance == null) {
-                Handler handler = new LockInterruptiblyHandler(key, sync, shardedJedisPool);
+                Handler handler = new LockInterruptiblyHandler(key, atomicity, shardedJedisPool);
                 handler.acquire();
                 entrance = new Entrance(handler);
                 entranceThreadLocal.set(entrance);
@@ -95,7 +99,7 @@ public class RedisReentrantLock implements Lock {
         try {
             Entrance entrance = entranceThreadLocal.get();
             if (entrance == null) {
-                Handler handler = new TryLockHandler(key, sync, shardedJedisPool);
+                Handler handler = new TryLockHandler(key, atomicity, shardedJedisPool);
                 if (!handler.acquire()) {
                     return false;
                 }
@@ -122,7 +126,7 @@ public class RedisReentrantLock implements Lock {
             Entrance entrance = entranceThreadLocal.get();
             if (entrance == null) {
                 long timeout = unit.toMillis(time);
-                Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, sync, shardedJedisPool, timeout) : new TryLockHandler(key, sync, shardedJedisPool);
+                Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, atomicity, shardedJedisPool, timeout) : new TryLockHandler(key, atomicity, shardedJedisPool);
                 if (!handler.acquire()) {
                     return false;
                 }
@@ -162,62 +166,64 @@ public class RedisReentrantLock implements Lock {
         throw new UnsupportedOperationException();
     }
 
-    private static class Sync {
-        private final String key;
-        private final long ttl;
+    protected static class Entrance {
+        protected final Handler handler;
+        protected final AtomicLong count = new AtomicLong(0);
 
-        Sync(String key, long ttl) {
+        protected Entrance(Handler handler) {
+            this.handler = handler;
+        }
+
+        protected void increase() {
+            count.incrementAndGet();
+        }
+
+        protected long decrease() {
+            return count.decrementAndGet();
+        }
+    }
+
+    protected static class LockAtomicity implements RedisAtomicity<String> {
+        protected final String key;
+        protected final long ttl;
+
+        protected LockAtomicity(String key, long ttl) {
             this.key = key;
             this.ttl = ttl;
         }
 
-        boolean tryLock(ShardedJedis jedis, String value) {
+        @Override
+        public boolean tryLock(ShardedJedis jedis, String value) {
             SetParams params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
             String result = jedis.set(key, value, params);
             return "OK".equals(result);
         }
 
-        void disLock(ShardedJedis jedis, String value) {
+        @Override
+        public void disLock(ShardedJedis jedis, String value) {
             String script = "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
             jedis.getShard(key).eval(script, 1, key, value);
             jedis.getShard(key).publish(key, value);
         }
     }
 
-    private static class Entrance {
-        final Handler handler;
-        final AtomicLong count = new AtomicLong(0);
+    protected abstract static class Handler extends JedisPubSub {
+        protected final String key;
+        protected final RedisAtomicity<String> atomicity;
+        protected final ShardedJedis reader;
+        protected final ShardedJedis writer;
 
-        Entrance(Handler handler) {
-            this.handler = handler;
-        }
+        protected volatile boolean locked;
+        protected final String value = UUID.randomUUID().toString();
 
-        void increase() {
-            count.incrementAndGet();
-        }
-
-        long decrease() {
-            return count.decrementAndGet();
-        }
-    }
-
-    private abstract static class Handler extends JedisPubSub {
-        final String key;
-        final Sync sync;
-        final ShardedJedis reader;
-        final ShardedJedis writer;
-
-        volatile boolean locked;
-        final String value = UUID.randomUUID().toString();
-
-        Handler(String key, Sync sync, ShardedJedisPool shardedJedisPool) {
+        protected Handler(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
             this.key = key;
-            this.sync = sync;
+            this.atomicity = atomicity;
             this.reader = shardedJedisPool.getResource();
             this.writer = shardedJedisPool.getResource();
         }
 
-        boolean acquire() {
+        protected boolean acquire() {
             try {
                 reader.getShard(key).subscribe(this, key);
                 return locked;
@@ -228,12 +234,12 @@ public class RedisReentrantLock implements Lock {
             }
         }
 
-        void release() {
+        protected void release() {
             if (!writer.getShard(key).isConnected()) {
                 return;
             }
             try {
-                sync.disLock(writer, value);
+                atomicity.disLock(writer, value);
             } finally {
                 locked = false;
                 reader.close();
@@ -243,10 +249,10 @@ public class RedisReentrantLock implements Lock {
 
     }
 
-    private static class LockHandler extends Handler {
+    protected static class LockHandler extends Handler {
 
-        LockHandler(String key, Sync sync, ShardedJedisPool shardedJedisPool) {
-            super(key, sync, shardedJedisPool);
+        protected LockHandler(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
+            super(key, atomicity, shardedJedisPool);
         }
 
         @Override
@@ -256,7 +262,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = sync.tryLock(writer, value);
+            boolean ok = atomicity.tryLock(writer, value);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
@@ -264,10 +270,10 @@ public class RedisReentrantLock implements Lock {
         }
     }
 
-    private static class LockInterruptiblyHandler extends Handler {
+    protected static class LockInterruptiblyHandler extends Handler {
 
-        LockInterruptiblyHandler(String key, Sync sync, ShardedJedisPool shardedJedisPool) {
-            super(key, sync, shardedJedisPool);
+        protected LockInterruptiblyHandler(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
+            super(key, atomicity, shardedJedisPool);
         }
 
         @Override
@@ -277,7 +283,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = sync.tryLock(writer, value);
+            boolean ok = atomicity.tryLock(writer, value);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
@@ -285,32 +291,32 @@ public class RedisReentrantLock implements Lock {
         }
     }
 
-    private static class TryLockHandler extends Handler {
+    protected static class TryLockHandler extends Handler {
 
-        TryLockHandler(String key, Sync sync, ShardedJedisPool shardedJedisPool) {
-            super(key, sync, shardedJedisPool);
+        protected TryLockHandler(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool) {
+            super(key, atomicity, shardedJedisPool);
         }
 
         @Override
         public void onSubscribe(String channel, int subscribedChannels) {
-            locked = sync.tryLock(writer, value);
+            locked = atomicity.tryLock(writer, value);
             this.unsubscribe(key);
         }
     }
 
-    private static class TryLockTimeoutiblyHandler extends Handler {
-        private final static Timer TIMER = new Timer(true);
+    protected static class TryLockTimeoutiblyHandler extends Handler {
+        protected final static Timer TIMER = new Timer(true);
 
-        private final long timeout;
-        private final TimerTask interrupter = new TimerTask() {
+        protected final long timeout;
+        protected final TimerTask interrupter = new TimerTask() {
             @Override
             public void run() {
                 TryLockTimeoutiblyHandler.this.unsubscribe(key);
             }
         };
 
-        TryLockTimeoutiblyHandler(String key, Sync sync, ShardedJedisPool shardedJedisPool, long timeout) {
-            super(key, sync, shardedJedisPool);
+        protected TryLockTimeoutiblyHandler(String key, RedisAtomicity<String> atomicity, ShardedJedisPool shardedJedisPool, long timeout) {
+            super(key, atomicity, shardedJedisPool);
             this.timeout = timeout;
         }
 
@@ -322,7 +328,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = sync.tryLock(writer, value);
+            boolean ok = atomicity.tryLock(writer, value);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
