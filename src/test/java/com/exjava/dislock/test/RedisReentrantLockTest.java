@@ -21,24 +21,48 @@ public class RedisReentrantLockTest {
 
     @Test
     public void testWithoutTTL() throws Exception {
-        String key = "lockWithoutTimeout";
-        JedisPoolConfig config = new JedisPoolConfig();
-        config.setMaxTotal(3000);
-        final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
-        final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
-        final int[] arr = new int[1];
-        for (int i = 0; i < 20000; i++) {
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    lock.lock();
-                    try {
-                        System.out.println(arr[0] += 1);
-                    } finally {
-                        lock.unlock();
+        {
+            String key = "lockWithoutTimeout";
+            JedisPoolConfig config = new JedisPoolConfig();
+            config.setMaxTotal(3000);
+            final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
+            final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
+            final int[] arr = new int[1];
+            for (int i = 0; i < 2000; i++) {
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        lock.lock();
+                        try {
+                            System.out.println(arr[0] += 1);
+                        } finally {
+                            lock.unlock();
+                        }
                     }
-                }
-            }).start();
+                }).start();
+            }
+        }
+
+        {
+            String key = "lockWithoutTimeout";
+            JedisPoolConfig config = new JedisPoolConfig();
+            config.setMaxTotal(3000);
+            final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
+            final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
+            final int[] arr = new int[1];
+            for (int i = 0; i < 2000; i++) {
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        lock.lock();
+                        try {
+                            System.err.println(arr[0] += 1);
+                        } finally {
+                            lock.unlock();
+                        }
+                    }
+                }).start();
+            }
         }
 
         Thread.sleep(30000);
