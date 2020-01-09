@@ -2,6 +2,8 @@ package com.exjava.dislock;
 
 import redis.clients.jedis.ShardedJedisPool;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 
@@ -48,9 +50,39 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
         return null;
     }
 
-    private static class ReadLock {
+    private static class ReadLock implements Lock {
 
+        @Override
+        public void lock() {
+
+        }
+
+        @Override
+        public void lockInterruptibly() throws InterruptedException {
+
+        }
+
+        @Override
+        public boolean tryLock() {
+            return false;
+        }
+
+        @Override
+        public boolean tryLock(long time, TimeUnit unit) throws InterruptedException {
+            return false;
+        }
+
+        @Override
+        public void unlock() {
+
+        }
+
+        @Override
+        public Condition newCondition() {
+            return null;
+        }
     }
+
 
     private static class WriteLock {
 
