@@ -19,8 +19,16 @@ public class RedisSynchronized {
         this.lock = new RedisReentrantLock(mutex, shardedJedisPool);
     }
 
+    private RedisSynchronized(String mutex, long ttl, ShardedJedisPool shardedJedisPool) {
+        this.lock = new RedisReentrantLock(mutex, ttl, shardedJedisPool);
+    }
+
     public static RedisSynchronized of(String mutex, ShardedJedisPool shardedJedisPool) {
         return new RedisSynchronized(mutex, shardedJedisPool);
+    }
+
+    public static RedisSynchronized of(String mutex, long ttl, ShardedJedisPool shardedJedisPool) {
+        return new RedisSynchronized(mutex, ttl, shardedJedisPool);
     }
 
     public void run(Runnable runnable) throws JedisException {
