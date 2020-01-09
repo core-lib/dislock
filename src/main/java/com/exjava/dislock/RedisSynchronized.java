@@ -12,15 +12,15 @@ import java.util.concurrent.locks.Lock;
  * @author Payne 646742615@qq.com
  * 2020/1/7 16:41
  */
-public class Synchronized {
+public class RedisSynchronized {
     private final Lock lock;
 
-    private Synchronized(String mutex, ShardedJedisPool shardedJedisPool) {
-        this.lock = new ReentrantLock(mutex, shardedJedisPool);
+    private RedisSynchronized(String mutex, ShardedJedisPool shardedJedisPool) {
+        this.lock = new RedisReentrantLock(mutex, shardedJedisPool);
     }
 
-    public static Synchronized of(String mutex, ShardedJedisPool shardedJedisPool) {
-        return new Synchronized(mutex, shardedJedisPool);
+    public static RedisSynchronized of(String mutex, ShardedJedisPool shardedJedisPool) {
+        return new RedisSynchronized(mutex, shardedJedisPool);
     }
 
     public void run(Runnable runnable) throws JedisException {

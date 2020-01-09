@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 基于Redis的分布式可重入锁
@@ -20,19 +21,19 @@ import java.util.concurrent.locks.Lock;
  * @author Payne 646742615@qq.com
  * 2020/1/6 17:26
  */
-public class ReentrantLock implements Lock {
+public class RedisReentrantLock implements Lock {
     private final String key;
     private final long ttl;
     private final ShardedJedisPool shardedJedisPool;
     private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
-    private final Lock lock = new java.util.concurrent.locks.ReentrantLock();
+    private final Lock lock = new ReentrantLock();
 
-    public ReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
+    public RedisReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
         this(key, 0L, shardedJedisPool);
     }
 
-    public ReentrantLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+    public RedisReentrantLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }

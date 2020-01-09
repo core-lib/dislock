@@ -11,7 +11,7 @@ import java.util.concurrent.locks.ReadWriteLock;
  * @author Payne 646742615@qq.com
  * 2020/1/7 16:40
  */
-public class ReentrantReadWriteLock implements ReadWriteLock {
+public class RedisReentrantReadWriteLock implements ReadWriteLock {
     private final static String SCRIPT_WRITE_LOCK_ACQUIRE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
     private final static String SCRIPT_WRITE_LOCK_RELEASE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
 
@@ -22,11 +22,11 @@ public class ReentrantReadWriteLock implements ReadWriteLock {
     private final long ttl;
     private final ShardedJedisPool shardedJedisPool;
 
-    public ReentrantReadWriteLock(String key, ShardedJedisPool shardedJedisPool) {
+    public RedisReentrantReadWriteLock(String key, ShardedJedisPool shardedJedisPool) {
         this(key, 0L, shardedJedisPool);
     }
 
-    public ReentrantReadWriteLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+    public RedisReentrantReadWriteLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }

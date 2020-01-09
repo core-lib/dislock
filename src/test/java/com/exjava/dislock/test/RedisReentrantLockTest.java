@@ -1,6 +1,6 @@
 package com.exjava.dislock.test;
 
-import com.exjava.dislock.ReentrantLock;
+import com.exjava.dislock.RedisReentrantLock;
 import org.junit.Test;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.JedisShardInfo;
@@ -17,7 +17,7 @@ import java.util.concurrent.locks.Lock;
  * @author Payne 646742615@qq.com
  * 2020/1/7 15:25
  */
-public class ReentrantLockTest {
+public class RedisReentrantLockTest {
 
     @Test
     public void testWithoutTTL() throws Exception {
@@ -25,7 +25,7 @@ public class ReentrantLockTest {
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
         final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
-        final ReentrantLock lock = new ReentrantLock(key, pool);
+        final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
         final int[] arr = new int[1];
         for (int i = 0; i < 20000; i++) {
             new Thread(new Runnable() {
@@ -50,7 +50,7 @@ public class ReentrantLockTest {
         JedisPoolConfig config = new JedisPoolConfig();
         config.setMaxTotal(3000);
         ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
-        final ReentrantLock lock = new ReentrantLock(key, 10 * 1000L, pool);
+        final RedisReentrantLock lock = new RedisReentrantLock(key, 10 * 1000L, pool);
         final AtomicInteger count = new AtomicInteger(0);
         for (int i = 0; i < 100; i++) {
             new Thread(new Runnable() {
