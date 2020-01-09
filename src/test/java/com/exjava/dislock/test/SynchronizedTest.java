@@ -23,7 +23,7 @@ public class SynchronizedTest {
         ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379)));
         final Synchronized sync = Synchronized.of("mutex", pool);
         final int[] arr = new int[1];
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 1000; i++) {
             new Thread(new Runnable() {
                 @Override
                 public void run() {

@@ -1,5 +1,7 @@
 package com.exjava.dislock;
 
+import redis.clients.jedis.ShardedJedisPool;
+
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 
@@ -10,6 +12,31 @@ import java.util.concurrent.locks.ReadWriteLock;
  * 2020/1/7 16:40
  */
 public class ReentrantReadWriteLock implements ReadWriteLock {
+    private final static String SCRIPT_WRITE_LOCK_ACQUIRE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
+    private final static String SCRIPT_WRITE_LOCK_RELEASE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
+
+    private final static String SCRIPT_READ_LOCK_ACQUIRE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
+    private final static String SCRIPT_READ_LOCK_RELEASE = "if (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) and (redis.call('EXISTS', KEYS[1]) == 0 or redis.call('GET', KEYS[1]) == 0) then return redis.call('INCR', KEYS[1]) else return 0 end";
+
+    private final String key;
+    private final long ttl;
+    private final ShardedJedisPool shardedJedisPool;
+
+    public ReentrantReadWriteLock(String key, ShardedJedisPool shardedJedisPool) {
+        this(key, 0L, shardedJedisPool);
+    }
+
+    public ReentrantReadWriteLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
+        if (key == null || key.isEmpty()) {
+            throw new IllegalArgumentException("key must not be null or empty string");
+        }
+        if (shardedJedisPool == null) {
+            throw new IllegalArgumentException("sharded jedis pool must not be null");
+        }
+        this.key = key;
+        this.ttl = ttl;
+        this.shardedJedisPool = shardedJedisPool;
+    }
 
     @Override
     public Lock readLock() {
@@ -20,4 +47,13 @@ public class ReentrantReadWriteLock implements ReadWriteLock {
     public Lock writeLock() {
         return null;
     }
+
+    private static class ReadLock {
+
+    }
+
+    private static class WriteLock {
+
+    }
+
 }

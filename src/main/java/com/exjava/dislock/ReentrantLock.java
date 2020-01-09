@@ -1,7 +1,7 @@
 package com.exjava.dislock;
 
-import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
+import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPool;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.params.SetParams;
@@ -26,8 +26,10 @@ public class ReentrantLock implements Lock {
     private final ShardedJedisPool shardedJedisPool;
     private final ThreadLocal<Entrance> entranceThreadLocal = new ThreadLocal<Entrance>();
 
+    private final Lock lock = new java.util.concurrent.locks.ReentrantLock();
+
     public ReentrantLock(String key, ShardedJedisPool shardedJedisPool) {
-        this(key, 0, shardedJedisPool);
+        this(key, 0L, shardedJedisPool);
     }
 
     public ReentrantLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
@@ -44,75 +46,113 @@ public class ReentrantLock implements Lock {
 
     @Override
     public void lock() throws JedisException {
-        Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null) {
-            Handler handler = new LockHandler(key, ttl, shardedJedisPool);
-            handler.acquire();
-            entrance = new Entrance(handler);
-            entranceThreadLocal.set(entrance);
+        lock.lock();
+        try {
+            Entrance entrance = entranceThreadLocal.get();
+            if (entrance == null) {
+                Handler handler = new LockHandler(key, ttl, shardedJedisPool);
+                handler.acquire();
+                entrance = new Entrance(handler);
+                entranceThreadLocal.set(entrance);
+            }
+            entrance.increase();
+        } catch (RuntimeException e) {
+            lock.unlock();
+            throw e;
+        } catch (Throwable e) {
+            lock.unlock();
+            throw new RuntimeException(e);
         }
-        entrance.increase();
     }
 
     @Override
     public void lockInterruptibly() throws JedisException, InterruptedException {
-        if (Thread.interrupted()) {
-            throw new InterruptedException();
+        lock.lockInterruptibly();
+        try {
+            Entrance entrance = entranceThreadLocal.get();
+            if (entrance == null) {
+                Handler handler = new LockInterruptiblyHandler(key, ttl, shardedJedisPool);
+                handler.acquire();
+                entrance = new Entrance(handler);
+                entranceThreadLocal.set(entrance);
+            }
+            entrance.increase();
+        } catch (RuntimeException e) {
+            lock.unlock();
+            throw e;
+        } catch (Throwable e) {
+            lock.unlock();
+            throw new RuntimeException(e);
         }
-        Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null) {
-            Handler handler = new LockInterruptiblyHandler(key, ttl, shardedJedisPool);
-            handler.acquire();
-            entrance = new Entrance(handler);
-            entranceThreadLocal.set(entrance);
-        }
-        entrance.increase();
     }
 
     @Override
     public boolean tryLock() throws JedisException {
-        Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null) {
-            Handler handler = new TryLockHandler(key, ttl, shardedJedisPool);
-            if (!handler.acquire()) {
-                return false;
-            }
-            entrance = new Entrance(handler);
-            entranceThreadLocal.set(entrance);
+        if (!lock.tryLock()) {
+            return false;
         }
-        entrance.increase();
-        return true;
+        try {
+            Entrance entrance = entranceThreadLocal.get();
+            if (entrance == null) {
+                Handler handler = new TryLockHandler(key, ttl, shardedJedisPool);
+                if (!handler.acquire()) {
+                    return false;
+                }
+                entrance = new Entrance(handler);
+                entranceThreadLocal.set(entrance);
+            }
+            entrance.increase();
+            return true;
+        } catch (RuntimeException e) {
+            lock.unlock();
+            throw e;
+        } catch (Throwable e) {
+            lock.unlock();
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     public boolean tryLock(long time, TimeUnit unit) throws JedisException, InterruptedException {
-        if (Thread.interrupted()) {
-            throw new InterruptedException();
+        if (!lock.tryLock(time, unit)) {
+            return false;
         }
-        Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null) {
-            long timeout = unit.toMillis(time);
-            Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, ttl, shardedJedisPool, timeout) : new TryLockHandler(key, ttl, shardedJedisPool);
-            if (!handler.acquire()) {
-                return false;
+        try {
+            Entrance entrance = entranceThreadLocal.get();
+            if (entrance == null) {
+                long timeout = unit.toMillis(time);
+                Handler handler = timeout > 0L ? new TryLockTimeoutiblyHandler(key, ttl, shardedJedisPool, timeout) : new TryLockHandler(key, ttl, shardedJedisPool);
+                if (!handler.acquire()) {
+                    return false;
+                }
+                entrance = new Entrance(handler);
+                entranceThreadLocal.set(entrance);
             }
-            entrance = new Entrance(handler);
-            entranceThreadLocal.set(entrance);
+            entrance.increase();
+            return true;
+        } catch (RuntimeException e) {
+            lock.unlock();
+            throw e;
+        } catch (Throwable e) {
+            lock.unlock();
+            throw new RuntimeException(e);
         }
-        entrance.increase();
-        return true;
     }
 
     @Override
     public void unlock() throws JedisException {
-        Entrance entrance = entranceThreadLocal.get();
-        if (entrance == null) {
-            throw new IllegalMonitorStateException();
-        }
-        if (entrance.decrease() == 0L) {
-            entranceThreadLocal.remove();
-            Handler handler = entrance.handler;
-            handler.release();
+        try {
+            Entrance entrance = entranceThreadLocal.get();
+            if (entrance == null) {
+                throw new IllegalMonitorStateException();
+            }
+            if (entrance.decrease() == 0L) {
+                entranceThreadLocal.remove();
+                Handler handler = entrance.handler;
+                handler.release();
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -141,8 +181,8 @@ public class ReentrantLock implements Lock {
     private abstract static class Handler extends JedisPubSub {
         final String key;
         final SetParams params;
-        final Jedis reader;
-        final Jedis writer;
+        final ShardedJedis reader;
+        final ShardedJedis writer;
 
         volatile boolean locked;
         final String value = UUID.randomUUID().toString();
@@ -150,13 +190,13 @@ public class ReentrantLock implements Lock {
         Handler(String key, long ttl, ShardedJedisPool shardedJedisPool) {
             this.key = key;
             this.params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
-            this.reader = shardedJedisPool.getResource().getShard(key);
-            this.writer = shardedJedisPool.getResource().getShard(key);
+            this.reader = shardedJedisPool.getResource();
+            this.writer = shardedJedisPool.getResource();
         }
 
         boolean acquire() {
             try {
-                reader.subscribe(this, key);
+                reader.getShard(key).subscribe(this, key);
                 return locked;
             } finally {
                 if (!locked) {
@@ -166,13 +206,13 @@ public class ReentrantLock implements Lock {
         }
 
         void release() {
-            if (!writer.isConnected()) {
+            if (!writer.getShard(key).isConnected()) {
                 return;
             }
             try {
-                String script = "if redis.call(\"get\",KEYS[1]) == ARGV[1] then return redis.call(\"del\",KEYS[1]) else return 0 end";
-                writer.eval(script, 1, key, value);
-                writer.publish(key, value);
+                String script = "if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end";
+                writer.getShard(key).eval(script, 1, key, value);
+                writer.getShard(key).publish(key, value);
             } finally {
                 locked = false;
                 reader.close();

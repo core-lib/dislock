@@ -1,6 +1,7 @@
 package com.exjava.dislock;
 
 import redis.clients.jedis.ShardedJedisPool;
+import redis.clients.jedis.exceptions.JedisException;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.locks.Lock;
@@ -22,9 +23,9 @@ public class Synchronized {
         return new Synchronized(mutex, shardedJedisPool);
     }
 
-    public void run(Runnable runnable) {
+    public void run(Runnable runnable) throws JedisException {
+        lock.lock();
         try {
-            lock.lock();
             runnable.run();
         } finally {
             lock.unlock();
@@ -32,8 +33,8 @@ public class Synchronized {
     }
 
     public <V> V call(Callable<V> callable) throws Exception {
+        lock.lock();
         try {
-            lock.lock();
             return callable.call();
         } finally {
             lock.unlock();
