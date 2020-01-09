@@ -1,5 +1,6 @@
 package com.exjava.dislock;
 
+import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPool;
@@ -205,15 +206,17 @@ public class RedisReentrantLock implements Lock {
         @Override
         public boolean tryLock(ShardedJedis jedis, String value) {
             SetParams params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
-            String result = jedis.getShard(key).set(key, value, params);
+            Jedis shard = jedis.getShard(key);
+            String result = shard.set(key, value, params);
             return "OK".equals(result);
         }
 
         @Override
         public void disLock(ShardedJedis jedis, String value) {
             String script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
-            jedis.getShard(key).eval(script, 1, key, value);
-            jedis.getShard(key).publish(key, value);
+            Jedis shard = jedis.getShard(key);
+            shard.eval(script, 1, key, value);
+            shard.publish(key, value);
         }
     }
 

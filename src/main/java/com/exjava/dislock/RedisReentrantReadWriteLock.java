@@ -1,5 +1,6 @@
 package com.exjava.dislock;
 
+import redis.clients.jedis.Jedis;
 import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPool;
 
@@ -62,32 +63,24 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
 
         protected ReadLockAtomicity(String key, long ttl) {
             super(key, ttl);
-
-            StringBuilder script = new StringBuilder();
-            script.append(" if");
-            script.append("     redis.call('EXISTS', KEYS[1]..':WRITE') == 0");
-            script.append(" then");
-            if (ttl > 0L) {
-                script.append(" return redis.call('INCR', KEYS[1]..':READ', ARGV[1], 'NX', 'PX', ARGV[2])");
-            } else {
-                script.append(" return redis.call('SET', KEYS[1]..':WRITE', ARGV[1], 'NX')");
-            }
-            script.append(" else");
-            script.append("     return 0");
-            script.append(" end");
-            this.lockAcquireScript = script.toString();
-
-            this.lockReleaseScript = "if redis.call('EXISTS', KEYS[1]) == 1 and redis.call('GET', KEYS[1]..':READ') > 0 then return redis.call('DEL', KEYS[1]..':WRITE') else return 0 end";
+            this.lockAcquireScript = "if redis.call('EXISTS', KEYS[1]..':WRITE') == 0 then return redis.call('INCR', KEYS[1]..':READ') else return 0 end";
+            this.lockReleaseScript = "if redis.call('EXISTS', KEYS[1]..':READ') == 1 and tonumber(redis.call('GET', KEYS[1]..':READ')) > 0 then return tonumber(redis.call('DECR', KEYS[1]..':READ')) else return 0 end";
         }
 
         @Override
         public boolean tryLock(ShardedJedis jedis, String value) {
-            return false;
+            Jedis shard = jedis.getShard(key);
+            Long result = (Long) shard.eval(lockAcquireScript, 1, key);
+            return result > 0L;
         }
 
         @Override
         public void disLock(ShardedJedis jedis, String value) {
-
+            Jedis shard = jedis.getShard(key);
+            Long result = (Long) shard.eval(lockReleaseScript, 1, key);
+            if (result == 0L) {
+                shard.publish(key, value);
+            }
         }
     }
 
@@ -126,15 +119,18 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
 
         @Override
         public boolean tryLock(ShardedJedis jedis, String value) {
+            Jedis shard = jedis.getShard(key);
             Object result = ttl > 0L
-                    ? jedis.getShard(key).eval(lockAcquireScript, 1, key, value, String.valueOf(ttl))
-                    : jedis.getShard(key).eval(lockAcquireScript, 1, key, value);
+                    ? shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl))
+                    : shard.eval(lockAcquireScript, 1, key, value);
             return "OK".equals(result);
         }
 
         @Override
         public void disLock(ShardedJedis jedis, String value) {
-            jedis.getShard(key).eval(lockReleaseScript, 1, key, value);
+            Jedis shard = jedis.getShard(key);
+            shard.eval(lockReleaseScript, 1, key, value);
+            shard.publish(key, value);
         }
     }
 
