@@ -1,11 +1,13 @@
 package com.exjava.dislock.test;
 
+import com.exjava.dislock.RedisReentrantReadWriteLock;
 import org.junit.Test;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.JedisShardInfo;
 import redis.clients.jedis.ShardedJedisPool;
 
 import java.util.Collections;
+import java.util.concurrent.locks.ReadWriteLock;
 
 /**
  * Redis可重入读写锁测试
@@ -21,6 +23,12 @@ public class RedisReentrantReadWriteLockTest {
         config.setMaxTotal(3000);
         final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
 
+        ReadWriteLock lock = new RedisReentrantReadWriteLock("test", pool);
+        lock.writeLock().lock();
+        lock.readLock().lock();
+        System.out.println("OK");
+        lock.readLock().unlock();
+        lock.writeLock().unlock();
 
     }
 
