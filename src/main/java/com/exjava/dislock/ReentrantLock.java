@@ -141,11 +141,11 @@ public class ReentrantLock implements Lock {
 
     @Override
     public void unlock() throws JedisException {
+        Entrance entrance = entranceThreadLocal.get();
+        if (entrance == null) {
+            throw new IllegalMonitorStateException();
+        }
         try {
-            Entrance entrance = entranceThreadLocal.get();
-            if (entrance == null) {
-                throw new IllegalMonitorStateException();
-            }
             if (entrance.decrease() == 0L) {
                 entranceThreadLocal.remove();
                 Handler handler = entrance.handler;
