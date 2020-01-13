@@ -66,8 +66,8 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     }
 
     protected static class ReadLockAtomicity extends RedisReentrantLock.LockAtomicity {
-        protected final String lockAcquireScript;
-        protected final String lockReleaseScript;
+        protected final String lockupScript;
+        protected final String unlockScript;
 
         protected ReadLockAtomicity(String key, long ttl) {
             super(key, ttl);
@@ -95,7 +95,7 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             script.append("     return 0");
             // 结束
             script.append(" end");
-            this.lockAcquireScript = script.toString();
+            this.lockupScript = script.toString();
 
             script.setLength(0);
             // 如果
@@ -110,20 +110,20 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             script.append(" end");
             // 返回剩下的读锁持有数
             script.append(" return #redis.call('KEYS', KEYS[1]..':READ:*')");
-            this.lockReleaseScript = script.toString();
+            this.unlockScript = script.toString();
         }
 
         @Override
-        public boolean acquire(ShardedJedis jedis, String value) {
+        public boolean lockup(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            Object result = shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl));
+            Object result = shard.eval(lockupScript, 1, key, value, String.valueOf(ttl));
             return "OK".equals(result);
         }
 
         @Override
-        public void release(ShardedJedis jedis, String value) {
+        public void unlock(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            Long reads = (Long) shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
+            Long reads = (Long) shard.eval(unlockScript, 1, key, value, String.valueOf(ttl));
             if (reads == 0L) {
                 shard.publish(key, value);
             }
@@ -138,8 +138,8 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     }
 
     protected static class WriteLockAtomicity extends RedisReentrantLock.LockAtomicity {
-        protected final String lockAcquireScript;
-        protected final String lockReleaseScript;
+        protected final String lockupScript;
+        protected final String unlockScript;
 
         protected WriteLockAtomicity(String key, long ttl) {
             super(key, ttl);
@@ -167,7 +167,7 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             script.append("     return 0");
             // 结束
             script.append(" end");
-            this.lockAcquireScript = script.toString();
+            this.lockupScript = script.toString();
 
             script.setLength(0);
             // 如果
@@ -184,20 +184,20 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             script.append("     return 0");
             // 结束
             script.append(" end");
-            this.lockReleaseScript = script.toString();
+            this.unlockScript = script.toString();
         }
 
         @Override
-        public boolean acquire(ShardedJedis jedis, String value) {
+        public boolean lockup(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            Object result = shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl));
+            Object result = shard.eval(lockupScript, 1, key, value, String.valueOf(ttl));
             return "OK".equals(result);
         }
 
         @Override
-        public void release(ShardedJedis jedis, String value) {
+        public void unlock(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
+            shard.eval(unlockScript, 1, key, value, String.valueOf(ttl));
             shard.publish(key, value);
         }
     }

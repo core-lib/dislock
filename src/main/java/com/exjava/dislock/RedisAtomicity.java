@@ -17,7 +17,7 @@ public interface RedisAtomicity {
      * @param value 锁值
      * @return 如果加锁成功则返回{@code true} 否则返回{@code false}
      */
-    boolean acquire(ShardedJedis jedis, String value);
+    boolean lockup(ShardedJedis jedis, String value);
 
     /**
      * 解锁
@@ -25,6 +25,6 @@ public interface RedisAtomicity {
      * @param jedis redis 连接
      * @param value 锁值
      */
-    void release(ShardedJedis jedis, String value);
+    void unlock(ShardedJedis jedis, String value);
 
 }

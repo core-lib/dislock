@@ -220,7 +220,7 @@ public class RedisReentrantLock implements Lock {
         }
 
         @Override
-        public boolean acquire(ShardedJedis jedis, String token) {
+        public boolean lockup(ShardedJedis jedis, String token) {
             SetParams params = ttl > 0 ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
             Jedis shard = jedis.getShard(key);
             String result = shard.set(key, token, params);
@@ -228,7 +228,7 @@ public class RedisReentrantLock implements Lock {
         }
 
         @Override
-        public void release(ShardedJedis jedis, String token) {
+        public void unlock(ShardedJedis jedis, String token) {
             String script = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
             Jedis shard = jedis.getShard(key);
             shard.eval(script, 1, key, token);
@@ -269,7 +269,7 @@ public class RedisReentrantLock implements Lock {
                 return;
             }
             try {
-                atomicity.release(writer, token);
+                atomicity.unlock(writer, token);
             } finally {
                 locked = false;
                 reader.close();
@@ -292,7 +292,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = atomicity.acquire(writer, token);
+            boolean ok = atomicity.lockup(writer, token);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
@@ -313,7 +313,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = atomicity.acquire(writer, token);
+            boolean ok = atomicity.lockup(writer, token);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
@@ -329,7 +329,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onSubscribe(String channel, int subscribedChannels) {
-            locked = atomicity.acquire(writer, token);
+            locked = atomicity.lockup(writer, token);
             this.unsubscribe(key);
         }
     }
@@ -358,7 +358,7 @@ public class RedisReentrantLock implements Lock {
 
         @Override
         public void onMessage(String channel, String message) {
-            boolean ok = atomicity.acquire(writer, token);
+            boolean ok = atomicity.lockup(writer, token);
             if (ok) {
                 locked = true;
                 this.unsubscribe(key);
