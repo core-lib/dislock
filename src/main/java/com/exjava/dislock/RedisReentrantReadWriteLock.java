@@ -13,11 +13,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 /**
  * 基于Redis的分布式可重入读写锁
  *
- * 原理:
- * 1 : 获取读锁
- * 1.1 : 获取本地读锁
- *
- *
  * @author Payne 646742615@qq.com
  * 2020/1/7 16:40
  */
@@ -30,14 +25,22 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     }
 
     public RedisReentrantReadWriteLock(String key, long ttl, ShardedJedisPool shardedJedisPool) {
-        this(key, new ReadLockAtomicity(key, ttl), new WriteLockAtomicity(key, ttl), new ReentrantReadWriteLock(), shardedJedisPool);
+        this(key, new ReadLockAtomicity(key, ttl), new WriteLockAtomicity(key, ttl), new ThreadTokenGenerator(), new ReentrantReadWriteLock(), shardedJedisPool);
     }
 
-    protected RedisReentrantReadWriteLock(String key, RedisAtomicity<String> readLockAtomicity, RedisAtomicity<String> writeLockAtomicity, ShardedJedisPool shardedJedisPool) {
-        this(key, readLockAtomicity, writeLockAtomicity, new ReentrantReadWriteLock(), shardedJedisPool);
+    public RedisReentrantReadWriteLock(String key, TokenGenerator generator, ShardedJedisPool shardedJedisPool) {
+        this(key, 0L, generator, shardedJedisPool);
     }
 
-    protected RedisReentrantReadWriteLock(String key, RedisAtomicity<String> readLockAtomicity, RedisAtomicity<String> writeLockAtomicity, ReadWriteLock readWriteLock, ShardedJedisPool shardedJedisPool) {
+    public RedisReentrantReadWriteLock(String key, long ttl, TokenGenerator generator, ShardedJedisPool shardedJedisPool) {
+        this(key, new ReadLockAtomicity(key, ttl), new WriteLockAtomicity(key, ttl), generator, new ReentrantReadWriteLock(), shardedJedisPool);
+    }
+
+    protected RedisReentrantReadWriteLock(String key, RedisAtomicity readLockAtomicity, RedisAtomicity writeLockAtomicity, TokenGenerator generator, ShardedJedisPool shardedJedisPool) {
+        this(key, readLockAtomicity, writeLockAtomicity, generator, new ReentrantReadWriteLock(), shardedJedisPool);
+    }
+
+    protected RedisReentrantReadWriteLock(String key, RedisAtomicity readLockAtomicity, RedisAtomicity writeLockAtomicity, TokenGenerator generator, ReadWriteLock readWriteLock, ShardedJedisPool shardedJedisPool) {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
         }
@@ -51,8 +54,8 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             throw new IllegalArgumentException("write lock atomicity must not be null");
         }
         final ThreadLocal<RWEntrance> rwEntranceThreadLocal = new ThreadLocal<RWEntrance>();
-        this.readLock = new ReadLock(key, readLockAtomicity, readWriteLock.readLock(), shardedJedisPool, rwEntranceThreadLocal);
-        this.writeLock = new WriteLock(key, writeLockAtomicity, readWriteLock.writeLock(), shardedJedisPool, rwEntranceThreadLocal);
+        this.readLock = new ReadLock(key, readLockAtomicity, generator, readWriteLock.readLock(), shardedJedisPool, rwEntranceThreadLocal);
+        this.writeLock = new WriteLock(key, writeLockAtomicity, generator, readWriteLock.writeLock(), shardedJedisPool, rwEntranceThreadLocal);
     }
 
     @Override
@@ -71,32 +74,70 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
 
         protected ReadLockAtomicity(String key, long ttl) {
             super(key, ttl);
-            this.lockAcquireScript = "if redis.call('EXISTS', KEYS[1]..':WRITE') == 0 then return redis.call('INCR', KEYS[1]..':READ') else return 0 end";
-            this.lockReleaseScript = "if redis.call('EXISTS', KEYS[1]..':READ') == 1 and tonumber(redis.call('GET', KEYS[1]..':READ')) > 0 then return tonumber(redis.call('DECR', KEYS[1]..':READ')) else return 0 end";
-        }
 
-        @Override
-        public boolean tryLock(ShardedJedis jedis, String value) {
-            Jedis shard = jedis.getShard(key);
-            Long result = (Long) shard.eval(lockAcquireScript, 1, key);
-            return result > 0L;
-        }
-
-        @Override
-        public void disLock(ShardedJedis jedis, String value) {
-            Jedis shard = jedis.getShard(key);
-            Long result = (Long) shard.eval(lockReleaseScript, 1, key);
-            if (result == 0L) {
-                shard.publish(key, value);
+            StringBuilder script = new StringBuilder();
+            // 如果
+            script.append(" if");
+            // 写锁不存在
+            script.append("     redis.call('EXISTS', KEYS[1]..':WRITE') == 0");
+            // 或者
+            script.append(" or");
+            // 自身线程获取到写锁
+            script.append("     redis.call('GET', KEYS[1]..':WRITE') == ARGV[1]");
+            // 那么
+            script.append(" then");
+            // 创建读锁
+            if (ttl > 0L) {
+                script.append(" return redis.call('SET', KEYS[1]..':READ:'..ARGV[1], ARGV[1], 'NX', 'PX', ARGV[2])");
+            } else {
+                script.append(" return redis.call('SET', KEYS[1]..':READ:'..ARGV[1], ARGV[1], 'NX')");
             }
+            // 否则
+            script.append(" else");
+            // 直接返回
+            script.append("     return 0");
+            // 结束
+            script.append(" end");
+            this.lockAcquireScript = script.toString();
+
+            script.setLength(0);
+            // 如果
+            script.append(" if");
+            // 自身的读锁存在
+            script.append("     redis.call('GET', KEYS[1]..':READ:'..ARGV[1]) == ARGV[1]");
+            // 那么
+            script.append(" then");
+            // 删除自身的读锁
+            script.append("     return redis.call('DEL', KEYS[1]..':READ:'..ARGV[1])");
+            // 否则
+            script.append(" else");
+            // 直接返回
+            script.append("     return 0");
+            // 结束
+            script.append(" end");
+            this.lockReleaseScript = script.toString();
+        }
+
+        @Override
+        public boolean acquire(ShardedJedis jedis, String value) {
+            Jedis shard = jedis.getShard(key);
+            Object result = shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl));
+            return "OK".equals(result);
+        }
+
+        @Override
+        public void release(ShardedJedis jedis, String value) {
+            Jedis shard = jedis.getShard(key);
+            shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
+            shard.publish(key, value);
         }
     }
 
     protected static class ReadLock extends RedisReentrantLock {
         protected final ThreadLocal<RWEntrance> rwEntranceThreadLocal;
 
-        protected ReadLock(String key, RedisAtomicity<String> atomicity, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
-            super(key, atomicity, lock, shardedJedisPool);
+        protected ReadLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
+            super(key, atomicity, generator, lock, shardedJedisPool);
             this.rwEntranceThreadLocal = rwEntranceThreadLocal;
         }
 
@@ -134,38 +175,61 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             super(key, ttl);
 
             StringBuilder script = new StringBuilder();
-            script.append(" readers = redis.call('KEYS', KEYS[1]..':READ:*');");
+            // 获取当前运行中的读锁
+            script.append(" reads = redis.call('KEYS', KEYS[1]..':READ:*')");
+            // 如果
             script.append(" if");
+            // 存在不存在写锁
             script.append("     redis.call('EXISTS', KEYS[1]..':WRITE') == 0");
+            // 而且
             script.append(" and");
-            script.append("     (#readers == 0 or (#readers == 1 and readers[1] == ARGV[1]))");
+            // 读锁不存在 或者 读锁存在 但 只有自身线程占有读锁
+            script.append("     (#reads == 0 or (#reads == 1 and reads[1] == ARGV[1]))");
+            // 那么
             script.append(" then");
+            // 创建写锁
             if (ttl > 0L) {
                 script.append(" return redis.call('SET', KEYS[1]..':WRITE', ARGV[1], 'NX', 'PX', ARGV[2])");
             } else {
                 script.append(" return redis.call('SET', KEYS[1]..':WRITE', ARGV[1], 'NX')");
             }
+            // 否则
             script.append(" else");
+            // 直接返回
             script.append("     return 0");
+            // 结束
             script.append(" end");
             this.lockAcquireScript = script.toString();
 
-            this.lockReleaseScript = "if redis.call('GET', KEYS[1]..':WRITE') == ARGV[1] then return redis.call('DEL', KEYS[1]..':WRITE') else return 0 end";
+            script.setLength(0);
+            // 如果
+            script.append(" if");
+            // 自身的写锁存在
+            script.append("     redis.call('GET', KEYS[1]..':WRITE') == ARGV[1]");
+            // 那么
+            script.append(" then");
+            // 删除自身的写锁
+            script.append("     return redis.call('DEL', KEYS[1]..':WRITE')");
+            // 否则
+            script.append(" else");
+            // 直接返回
+            script.append("     return 0");
+            // 结束
+            script.append(" end");
+            this.lockReleaseScript = script.toString();
         }
 
         @Override
-        public boolean tryLock(ShardedJedis jedis, String value) {
+        public boolean acquire(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            Object result = ttl > 0L
-                    ? shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl))
-                    : shard.eval(lockAcquireScript, 1, key, value);
+            Object result = shard.eval(lockAcquireScript, 1, key, value, String.valueOf(ttl));
             return "OK".equals(result);
         }
 
         @Override
-        public void disLock(ShardedJedis jedis, String value) {
+        public void release(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            shard.eval(lockReleaseScript, 1, key, value);
+            shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
             shard.publish(key, value);
         }
     }
@@ -173,8 +237,8 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     protected static class WriteLock extends RedisReentrantLock {
         protected final ThreadLocal<RWEntrance> rwEntranceThreadLocal;
 
-        protected WriteLock(String key, RedisAtomicity<String> atomicity, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
-            super(key, atomicity, lock, shardedJedisPool);
+        protected WriteLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
+            super(key, atomicity, generator, lock, shardedJedisPool);
             this.rwEntranceThreadLocal = rwEntranceThreadLocal;
         }
 

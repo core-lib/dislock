@@ -8,7 +8,7 @@ import redis.clients.jedis.ShardedJedis;
  * @author Payne 646742615@qq.com
  * 2020/1/9 13:51
  */
-public interface RedisAtomicity<V> {
+public interface RedisAtomicity {
 
     /**
      * 尝试加锁
@@ -17,7 +17,7 @@ public interface RedisAtomicity<V> {
      * @param value 锁值
      * @return 如果加锁成功则返回{@code true} 否则返回{@code false}
      */
-    boolean tryLock(ShardedJedis jedis, V value);
+    boolean acquire(ShardedJedis jedis, String value);
 
     /**
      * 解锁
@@ -25,6 +25,6 @@ public interface RedisAtomicity<V> {
      * @param jedis redis 连接
      * @param value 锁值
      */
-    void disLock(ShardedJedis jedis, V value);
+    void release(ShardedJedis jedis, String value);
 
 }
