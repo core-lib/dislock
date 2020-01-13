@@ -105,13 +105,11 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             // 那么
             script.append(" then");
             // 删除自身的读锁
-            script.append("     return redis.call('DEL', KEYS[1]..':READ:'..ARGV[1])");
-            // 否则
-            script.append(" else");
-            // 直接返回
-            script.append("     return 0");
+            script.append("     redis.call('DEL', KEYS[1]..':READ:'..ARGV[1])");
             // 结束
             script.append(" end");
+            // 返回剩下的读锁持有数
+            script.append(" return #redis.call('KEYS', KEYS[1]..':READ:*')");
             this.lockReleaseScript = script.toString();
         }
 
@@ -125,8 +123,10 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
         @Override
         public void release(ShardedJedis jedis, String value) {
             Jedis shard = jedis.getShard(key);
-            shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
-            shard.publish(key, value);
+            Long reads = (Long) shard.eval(lockReleaseScript, 1, key, value, String.valueOf(ttl));
+            if (reads == 0L) {
+                shard.publish(key, value);
+            }
         }
     }
 
