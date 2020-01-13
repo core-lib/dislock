@@ -3,9 +3,7 @@ package com.exjava.dislock;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.ShardedJedis;
 import redis.clients.jedis.ShardedJedisPool;
-import redis.clients.jedis.exceptions.JedisException;
 
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -53,9 +51,8 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
         if (writeLockAtomicity == null) {
             throw new IllegalArgumentException("write lock atomicity must not be null");
         }
-        final ThreadLocal<RWEntrance> rwEntranceThreadLocal = new ThreadLocal<RWEntrance>();
-        this.readLock = new ReadLock(key, readLockAtomicity, generator, readWriteLock.readLock(), shardedJedisPool, rwEntranceThreadLocal);
-        this.writeLock = new WriteLock(key, writeLockAtomicity, generator, readWriteLock.writeLock(), shardedJedisPool, rwEntranceThreadLocal);
+        this.readLock = new ReadLock(key, readLockAtomicity, generator, readWriteLock.readLock(), shardedJedisPool);
+        this.writeLock = new WriteLock(key, writeLockAtomicity, generator, readWriteLock.writeLock(), shardedJedisPool);
     }
 
     @Override
@@ -134,36 +131,9 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     }
 
     protected static class ReadLock extends RedisReentrantLock {
-        protected final ThreadLocal<RWEntrance> rwEntranceThreadLocal;
 
-        protected ReadLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
+        protected ReadLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool) {
             super(key, atomicity, generator, lock, shardedJedisPool);
-            this.rwEntranceThreadLocal = rwEntranceThreadLocal;
-        }
-
-        @Override
-        public void lock() throws JedisException {
-            super.lock();
-        }
-
-        @Override
-        public void lockInterruptibly() throws JedisException, InterruptedException {
-            super.lockInterruptibly();
-        }
-
-        @Override
-        public boolean tryLock() throws JedisException {
-            return super.tryLock();
-        }
-
-        @Override
-        public boolean tryLock(long time, TimeUnit unit) throws JedisException, InterruptedException {
-            return super.tryLock(time, unit);
-        }
-
-        @Override
-        public void unlock() throws JedisException {
-            super.unlock();
         }
     }
 
@@ -175,16 +145,14 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
             super(key, ttl);
 
             StringBuilder script = new StringBuilder();
-            // 获取当前运行中的读锁
-            script.append(" local reads = redis.call('KEYS', KEYS[1]..':READ:*')");
             // 如果
             script.append(" if");
-            // 存在不存在写锁
+            // 不存在写锁
             script.append("     redis.call('EXISTS', KEYS[1]..':WRITE') == 0");
             // 而且
             script.append(" and");
-            // 读锁不存在 或者 读锁存在 但 只有自身线程占有读锁
-            script.append("     (#reads == 0 or (#reads == 1 and reads[1] == ARGV[1]))");
+            // 不存在读锁
+            script.append("     #redis.call('KEYS', KEYS[1]..':READ:*') == 0");
             // 那么
             script.append(" then");
             // 创建写锁
@@ -235,40 +203,10 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
     }
 
     protected static class WriteLock extends RedisReentrantLock {
-        protected final ThreadLocal<RWEntrance> rwEntranceThreadLocal;
 
-        protected WriteLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool, ThreadLocal<RWEntrance> rwEntranceThreadLocal) {
+        protected WriteLock(String key, RedisAtomicity atomicity, TokenGenerator generator, Lock lock, ShardedJedisPool shardedJedisPool) {
             super(key, atomicity, generator, lock, shardedJedisPool);
-            this.rwEntranceThreadLocal = rwEntranceThreadLocal;
-        }
-
-        @Override
-        public void lock() throws JedisException {
-            super.lock();
-        }
-
-        @Override
-        public void lockInterruptibly() throws JedisException, InterruptedException {
-            super.lockInterruptibly();
-        }
-
-        @Override
-        public boolean tryLock() throws JedisException {
-            return super.tryLock();
-        }
-
-        @Override
-        public boolean tryLock(long time, TimeUnit unit) throws JedisException, InterruptedException {
-            return super.tryLock(time, unit);
-        }
-
-        @Override
-        public void unlock() throws JedisException {
-            super.unlock();
         }
     }
 
-    protected static class RWEntrance {
-
-    }
 }
