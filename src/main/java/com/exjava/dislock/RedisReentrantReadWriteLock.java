@@ -176,7 +176,7 @@ public class RedisReentrantReadWriteLock implements ReadWriteLock {
 
             StringBuilder script = new StringBuilder();
             // 获取当前运行中的读锁
-            script.append(" reads = redis.call('KEYS', KEYS[1]..':READ:*')");
+            script.append(" local reads = redis.call('KEYS', KEYS[1]..':READ:*')");
             // 如果
             script.append(" if");
             // 存在不存在写锁

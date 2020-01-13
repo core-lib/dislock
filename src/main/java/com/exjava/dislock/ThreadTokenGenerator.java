@@ -1,5 +1,7 @@
 package com.exjava.dislock;
 
+import java.util.UUID;
+
 /**
  * 线程的令牌生成器
  *
@@ -7,9 +9,10 @@ package com.exjava.dislock;
  * 2020/1/13 14:26
  */
 public class ThreadTokenGenerator implements TokenGenerator {
+    private final String seed = UUID.randomUUID().toString();
 
     @Override
     public String generate(String key) {
-        return null;
+        return seed + "-" + Thread.currentThread().getId();
     }
 }
