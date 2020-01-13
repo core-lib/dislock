@@ -7,6 +7,7 @@ import redis.clients.jedis.JedisShardInfo;
 import redis.clients.jedis.ShardedJedisPool;
 
 import java.util.Collections;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
@@ -21,6 +22,7 @@ public class RedisReentrantLockTest {
 
     @Test
     public void testWithoutTTL() throws Exception {
+        final Random random = new Random();
         {
             String key = "lockWithoutTimeout";
             JedisPoolConfig config = new JedisPoolConfig();
@@ -35,6 +37,9 @@ public class RedisReentrantLockTest {
                         lock.lock();
                         try {
                             System.out.println(arr[0] += 1);
+                            Thread.sleep(random.nextInt(1000));
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
                         } finally {
                             lock.unlock();
                         }
@@ -57,6 +62,9 @@ public class RedisReentrantLockTest {
                         lock.lock();
                         try {
                             System.err.println(arr[0] += 1);
+                            Thread.sleep(random.nextInt(1000));
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
                         } finally {
                             lock.unlock();
                         }
@@ -65,7 +73,7 @@ public class RedisReentrantLockTest {
             }
         }
 
-        Thread.sleep(30000);
+        Thread.sleep(300000);
     }
 
     @Test

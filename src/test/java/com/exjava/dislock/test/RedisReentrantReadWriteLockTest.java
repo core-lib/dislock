@@ -26,10 +26,13 @@ public class RedisReentrantReadWriteLockTest {
         ReadWriteLock lock = new RedisReentrantReadWriteLock("test", pool);
         lock.writeLock().lock();
         lock.readLock().lock();
+        lock.readLock().lock();
+        lock.readLock().lock();
         System.out.println("OK");
         lock.readLock().unlock();
+        lock.readLock().unlock();
+        lock.readLock().unlock();
         lock.writeLock().unlock();
-
     }
 
 }
