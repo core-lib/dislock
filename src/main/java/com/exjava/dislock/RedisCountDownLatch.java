@@ -1,9 +1,11 @@
 package com.exjava.dislock;
 
-import redis.clients.jedis.*;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPubSub;
+import redis.clients.jedis.ShardedJedis;
+import redis.clients.jedis.ShardedJedisPool;
 import redis.clients.jedis.params.SetParams;
 
-import java.util.Collections;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
@@ -20,20 +22,19 @@ public class RedisCountDownLatch extends CountDownLatch {
     protected final String key;
     protected final ShardedJedisPool shardedJedisPool;
 
-    public static void main(String[] args) throws InterruptedException {
-        JedisPoolConfig config = new JedisPoolConfig();
-        config.setMaxTotal(3000);
-        final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
-        CountDownLatch latch = new RedisCountDownLatch(1, "CountDownLatch", pool);
-        latch.await();
-        System.out.println("OK");
-    }
-
     public RedisCountDownLatch(int count, String key, ShardedJedisPool shardedJedisPool) {
         this(count, key, 0L, shardedJedisPool);
     }
 
     public RedisCountDownLatch(int count, String key, long ttl, ShardedJedisPool shardedJedisPool) {
+        this(count, key, ttl, false, shardedJedisPool);
+    }
+
+    public RedisCountDownLatch(int count, String key, boolean resetIfZeroed, ShardedJedisPool shardedJedisPool) {
+        this(count, key, 0L, resetIfZeroed, shardedJedisPool);
+    }
+
+    public RedisCountDownLatch(int count, String key, long ttl, boolean resetIfZeroed, ShardedJedisPool shardedJedisPool) {
         super(count);
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("key must not be null or empty string");
@@ -46,8 +47,27 @@ public class RedisCountDownLatch extends CountDownLatch {
 
         ShardedJedis jedis = shardedJedisPool.getResource();
         try {
-            SetParams params = ttl > 0L ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
-            jedis.set(key, String.valueOf(count), params);
+            if (resetIfZeroed) {
+                StringBuilder script = new StringBuilder();
+                script.append(" if");
+                script.append("     redis.call('EXISTS', KEYS[1]) == 0");
+                script.append(" or");
+                script.append("     tonumber(redis.call('GET', KEYS[1])) == 0");
+                script.append(" then");
+                script.append("     redis.call('SET', KEYS[1], ARGV[1]);");
+                if (ttl > 0L) {
+                    script.append("     redis.call('PEXPIRE', KEYS[1], ARGV[2]);");
+                }
+                script.append("     return 1;");
+                script.append(" else");
+                script.append("     return 0;");
+                script.append(" end");
+                Jedis shard = jedis.getShard(key);
+                shard.eval(script.toString(), 1, key, String.valueOf(count), String.valueOf(ttl));
+            } else {
+                SetParams params = ttl > 0L ? SetParams.setParams().nx().px(ttl) : SetParams.setParams().nx();
+                jedis.set(key, String.valueOf(count), params);
+            }
         } finally {
             jedis.close();
         }
