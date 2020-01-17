@@ -13,12 +13,23 @@ import java.util.concurrent.TimeoutException;
  */
 public class RedisCyclicBarrier extends CyclicBarrier {
 
-    public RedisCyclicBarrier(int parties, Runnable barrierAction) {
-        super(parties, barrierAction);
+    public static void main(String[] args) throws BrokenBarrierException, InterruptedException {
+        CyclicBarrier barrier = new CyclicBarrier(1);
+        try {
+            barrier.await(1, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        barrier.await();
+        System.out.println(barrier);
     }
 
     public RedisCyclicBarrier(int parties) {
-        super(parties);
+        this(parties, null);
+    }
+
+    public RedisCyclicBarrier(int parties, Runnable barrierAction) {
+        super(parties, barrierAction);
     }
 
     @Override

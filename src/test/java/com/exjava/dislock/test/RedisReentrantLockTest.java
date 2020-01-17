@@ -128,4 +128,30 @@ public class RedisReentrantLockTest {
         Thread.sleep(10 * 1000);
     }
 
+    @Test
+    public void testInterrupt() throws Exception {
+        String key = "lockInterrupt";
+        JedisPoolConfig config = new JedisPoolConfig();
+        config.setMaxTotal(3000);
+        final ShardedJedisPool pool = new ShardedJedisPool(config, Collections.singletonList(new JedisShardInfo("127.0.0.1", 6379, 20 * 1000)));
+        final RedisReentrantLock lock = new RedisReentrantLock(key, pool);
+        lock.lock();
+
+        Thread t1 = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    lock.lock();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+        t1.start();
+        Thread.sleep(1000);
+        t1.interrupt();
+        Thread.sleep(100 * 1000);
+    }
+
 }
